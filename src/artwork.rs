@@ -1,5 +1,11 @@
-//! Caches Spotify artwork inside the extension folder so the view can show it
-//! with `ImageSource::Bundled`, the only image source Krad's renderer draws.
+//! Caches Spotify artwork so the view can show it with
+//! `ImageSource::Bundled`, the only image source Krad's renderer draws.
+//!
+//! Bundled images must live under the extension folder, but Krad fingerprints
+//! that folder's content to decide whether the user trusts the extension, so
+//! a new cover there would ask for trust again. `<folder>/cache` is therefore
+//! a symbolic link (a junction on Windows) to a per-user cache directory:
+//! Krad records only the link's target, which never changes.
 //!
 //! The renderer does not clip images, so rounded corners are baked into the
 //! cached PNG as transparent pixels.
@@ -16,6 +22,8 @@ use std::process::Command;
 use crate::spotify::{self, Artwork};
 
 const CACHE_DIR: &str = "cache";
+/// Directory name inside the system cache directory.
+const APP_CACHE: &str = "krad-spotify";
 const PREFIX: &str = "cover-";
 const MAX_NAME: usize = 64;
 /// macOS ships curl at a fixed path; elsewhere it is looked up on `PATH`
@@ -35,6 +43,93 @@ const CORNER_RADIUS: f32 = 14.0;
 fn extension_folder() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
     Some(exe.parent()?.parent()?.to_path_buf())
+}
+
+/// The per-user cache directory for covers, outside the extension folder.
+fn system_cache_dir() -> Option<PathBuf> {
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    #[cfg(target_os = "macos")]
+    let base = home()?.join("Library").join("Caches");
+    #[cfg(windows)]
+    let base = PathBuf::from(std::env::var_os("LOCALAPPDATA")?);
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| home().map(|home| home.join(".cache")))?;
+    #[cfg(windows)]
+    let _ = home;
+    Some(base.join(APP_CACHE))
+}
+
+#[cfg(unix)]
+fn make_link(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+/// A directory symlink needs Developer Mode or admin rights on Windows; a
+/// junction does not.
+#[cfg(windows)]
+fn make_link(target: &Path, link: &Path) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    /// Hides the console window of the helper process.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    if std::os::windows::fs::symlink_dir(target, link).is_ok() {
+        return Ok(());
+    }
+    let status = Command::new("cmd")
+        .arg("/C")
+        .arg("mklink")
+        .arg("/J")
+        .arg(link)
+        .arg(target)
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("mklink /J failed"))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn make_link(_target: &Path, _link: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::other("links are not supported"))
+}
+
+/// The directory covers are written to, reached through `<folder>/cache`.
+///
+/// Makes `<folder>/cache` a link to the system cache directory, replacing an
+/// older in-folder cache. When no link can be made it falls back to a plain
+/// directory, which works but changes the folder's fingerprint.
+fn cache_dir(folder: &Path) -> Option<PathBuf> {
+    let link = folder.join(CACHE_DIR);
+    let plain = |dir: PathBuf| fs::create_dir_all(&dir).ok().map(|()| dir);
+    let Some(external) = system_cache_dir().filter(|dir| fs::create_dir_all(dir).is_ok()) else {
+        return plain(link);
+    };
+    match fs::symlink_metadata(&link) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            if fs::read_link(&link).ok().as_deref() == Some(external.as_path()) {
+                return Some(link);
+            }
+            // A link elsewhere (or a junction on Windows) is removed as a file or a directory.
+            let _ = fs::remove_file(&link).or_else(|_| fs::remove_dir(&link));
+        }
+        // An in-folder cache from an older version only holds covers.
+        Ok(meta) if meta.is_dir() => {
+            let _ = fs::remove_dir_all(&link);
+        }
+        Ok(_) => {
+            let _ = fs::remove_file(&link);
+        }
+        Err(_) => {}
+    }
+    if make_link(&external, &link).is_ok() {
+        Some(link)
+    } else {
+        plain(link)
+    }
 }
 
 fn file_name(source: &str) -> String {
@@ -132,7 +227,7 @@ pub fn local_cover(artwork: &Artwork) -> Option<PathBuf> {
         Artwork::Url(_) => return None,
         Artwork::Thumbnail(key) => key,
     };
-    let dir = extension_folder()?.join(CACHE_DIR);
+    let dir = cache_dir(&extension_folder()?)?;
     let name = file_name(source);
     let target = dir.join(&name);
     if !target.is_file() {
@@ -141,7 +236,6 @@ pub fn local_cover(artwork: &Artwork) -> Option<PathBuf> {
             Artwork::Thumbnail(_) => spotify::thumbnail()?,
         };
         let cover = rounded(&bytes)?;
-        fs::create_dir_all(&dir).ok()?;
         let partial = dir.join(format!("{name}.part"));
         if cover
             .save_with_format(&partial, image::ImageFormat::Png)
@@ -159,6 +253,28 @@ pub fn local_cover(artwork: &Artwork) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cache_is_a_link_out_of_the_extension_folder() {
+        let folder = std::env::temp_dir().join(format!("krad-spotify-test-{}", std::process::id()));
+        let old_cache = folder.join(CACHE_DIR);
+        fs::create_dir_all(&old_cache).unwrap();
+        fs::write(old_cache.join("cover-160-old.png"), b"x").unwrap();
+
+        let dir = cache_dir(&folder).unwrap();
+        assert_eq!(dir, folder.join(CACHE_DIR));
+        let meta = fs::symlink_metadata(&dir).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            "old cache not replaced by a link"
+        );
+        assert_eq!(fs::read_link(&dir).unwrap(), system_cache_dir().unwrap());
+        // A second call keeps the link as it is.
+        assert_eq!(cache_dir(&folder).unwrap(), dir);
+        fs::remove_file(&dir).unwrap();
+        fs::remove_dir(&folder).unwrap();
+    }
 
     #[test]
     fn corners_are_transparent_and_center_is_opaque() {

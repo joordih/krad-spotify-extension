@@ -1,0 +1,5 @@
+# Krad ADE loads this project folder as the extension itself. It refuses
+# folders over 256 MB and fingerprints every file to decide trust, so build
+# output must not live here. Relative to this project's root.
+[build]
+target-dir = "../krad-spotify-extension-target"

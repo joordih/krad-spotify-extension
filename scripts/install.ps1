@@ -18,9 +18,12 @@ $dest = "bin\krad-spotify-win-$Arch.exe"
 cargo build --release --target $target
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# Build output lives outside the extension folder (see .cargo/config.toml).
+$targetDir = (cargo metadata --format-version 1 --no-deps | ConvertFrom-Json).target_directory
+
 New-Item -ItemType Directory -Force -Path bin | Out-Null
 $tmp = "$dest.tmp"
-Copy-Item "target\$target\release\krad-spotify.exe" $tmp -Force
+Copy-Item (Join-Path $targetDir "$target\release\krad-spotify.exe") $tmp -Force
 Move-Item $tmp $dest -Force
 Write-Host "installed $dest"
 Write-Host "Reload the Spotify extension in Krad ADE to pick up the new binary."

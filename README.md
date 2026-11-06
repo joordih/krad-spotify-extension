@@ -73,7 +73,9 @@ Features a platform does not support are hidden from the panel (see [Platform su
 
    Cross-architecture builds need the matching Rust standard library, available through `rustup target add <target>`. The Homebrew Rust package only includes the host target.
 
-2. Keep `extension.toml` and `bin/` together in one folder. The extension must be able to write to this folder, because it caches the artwork there.
+2. Keep `extension.toml` and `bin/` together in one folder. The extension must be able to write to this folder, because it creates the `cache` link there.
+
+   Krad ADE refuses extension folders over 256 MB and asks for trust again whenever a file in the folder changes. `.cargo/config.toml` therefore builds into `../krad-spotify-extension-target`, next to the project, rather than into `target/` inside it.
 3. In Krad ADE, open the extension manager, add that local folder, and enable **Spotify**.
 
 `extension.toml` declares these binaries; Krad ADE picks the one for the current platform:
@@ -159,6 +161,7 @@ The extension reads Spotify's session from the system media controls. No extra p
 | Timeout error (`-1712`, macOS) | Spotify did not answer the Apple Event in time | Retry. Check that Spotify is responsive. |
 | "Spotify refused the request" (Windows) | Spotify rejected a media control request | Retry; some controls are unavailable during ads or for some content. |
 | Placeholder instead of artwork | Fetch failed, `curl` is missing, the extension folder is read-only, or `show-cover` is off | Check network access, `curl`, and folder permissions. |
+| "The extension folder is larger than an extension may be" | Build output inside the folder (over 256 MB) | Delete `target/`; builds go to `../krad-spotify-extension-target`. |
 
 Any other error is shown as-is in the view or as a toast.
 
@@ -202,9 +205,9 @@ Krad ADE's view renderer only draws images bundled with the extension (`ImageSou
 1. Gets the image: downloads the artwork URL with `curl` on macOS and Linux (HTTPS only, 5-second timeout), or reads the media session thumbnail on Windows.
 2. Resizes it to 320 × 320 px, twice the 160 px display size so it stays sharp on high-DPI screens.
 3. Makes the corners transparent, with anti-aliasing.
-4. Saves it as a PNG in `cache/` inside the extension folder.
+4. Saves it as a PNG in a per-user cache directory, reached through `cache` in the extension folder.
 
-Only the current track's artwork is kept. The cache directory is git-ignored.
+`cache` is a symbolic link (a junction on Windows) to `~/Library/Caches/krad-spotify` on macOS, `$XDG_CACHE_HOME/krad-spotify` (or `~/.cache/krad-spotify`) on Linux, and `%LOCALAPPDATA%\krad-spotify` on Windows. Krad ADE fingerprints every file in the extension folder to decide whether you trust it, and records only a link's target, so new covers do not ask for trust again. If no link can be made, the covers fall back to a plain `cache` directory. Only the current track's artwork is kept, and `cache` is git-ignored.
 
 ## Limitations
 

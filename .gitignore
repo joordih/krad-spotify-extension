@@ -1,12 +1,12 @@
-# Rust build output
+# Rust build output (normally outside the folder, see .cargo/config.toml)
 /target/
 
 # Release binaries: built locally from source (see README → Installation)
 /bin/*
 !/bin/.gitkeep
 
-# Album artwork cached at runtime by src/artwork.rs
-/cache/
+# Link to the per-user artwork cache, created at runtime by src/artwork.rs
+/cache
 *.part
 
 # macOS
