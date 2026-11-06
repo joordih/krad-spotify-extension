@@ -1,0 +1,163 @@
+id = "spotify"
+name = "Spotify"
+version = "0.1.0"
+description = "Shows and controls the local Spotify player on macOS, Linux and Windows"
+api = "1.0"
+activation = ["startup"]
+
+[program]
+placement = "app"
+
+[[program.binary]]
+targets = ["darwin_arm64"]
+path = "bin/krad-spotify-darwin-arm64"
+
+[[program.binary]]
+targets = ["darwin_x64"]
+path = "bin/krad-spotify-darwin-x64"
+
+[[program.binary]]
+targets = ["linux_x64"]
+path = "bin/krad-spotify-linux-x64"
+
+[[program.binary]]
+targets = ["linux_arm64"]
+path = "bin/krad-spotify-linux-arm64"
+
+[[program.binary]]
+targets = ["win_x64"]
+path = "bin/krad-spotify-win-x64.exe"
+
+[[program.binary]]
+targets = ["win_arm64"]
+path = "bin/krad-spotify-win-arm64.exe"
+
+[[contributes.view]]
+id = "spotify-player"
+title = "Spotify"
+zone = "side_panel"
+icon = "play"
+
+[[contributes.command]]
+id = "toggle-panel"
+title = "Spotify: Show / Hide Control Center"
+icon = "layers"
+
+[[contributes.command]]
+id = "playpause"
+title = "Spotify: Play / Pause"
+icon = "play"
+
+[[contributes.command]]
+id = "next"
+title = "Spotify: Next Track"
+icon = "chevron-right"
+
+[[contributes.command]]
+id = "previous"
+title = "Spotify: Previous Track"
+icon = "chevron-left"
+
+[[contributes.command]]
+id = "shuffle"
+title = "Spotify: Toggle Shuffle"
+icon = "exchange"
+
+[[contributes.command]]
+id = "repeat"
+title = "Spotify: Toggle Repeat"
+icon = "repeat"
+
+[[contributes.command]]
+id = "volume-up"
+title = "Spotify: Volume Up"
+icon = "add"
+
+[[contributes.command]]
+id = "volume-down"
+title = "Spotify: Volume Down"
+icon = "minus"
+
+[[contributes.command]]
+id = "open"
+title = "Spotify: Open Current Track in Spotify"
+icon = "open-external"
+
+[[contributes.keybinding]]
+command = "toggle-panel"
+macos = "ctrl-alt-cmd-p"
+linux = "ctrl-alt-shift-p"
+windows = "ctrl-alt-shift-p"
+
+[[contributes.keybinding]]
+command = "playpause"
+macos = "ctrl-alt-cmd-space"
+linux = "ctrl-alt-shift-space"
+windows = "ctrl-alt-shift-space"
+
+[[contributes.keybinding]]
+command = "next"
+macos = "ctrl-alt-cmd-right"
+linux = "ctrl-alt-shift-right"
+windows = "ctrl-alt-shift-right"
+
+[[contributes.keybinding]]
+command = "previous"
+macos = "ctrl-alt-cmd-left"
+linux = "ctrl-alt-shift-left"
+windows = "ctrl-alt-shift-left"
+
+[[contributes.keybinding]]
+command = "volume-up"
+macos = "ctrl-alt-cmd-up"
+linux = "ctrl-alt-shift-up"
+windows = "ctrl-alt-shift-up"
+
+[[contributes.keybinding]]
+command = "volume-down"
+macos = "ctrl-alt-cmd-down"
+linux = "ctrl-alt-shift-down"
+windows = "ctrl-alt-shift-down"
+
+[[contributes.keybinding]]
+command = "shuffle"
+macos = "ctrl-alt-cmd-s"
+linux = "ctrl-alt-shift-s"
+windows = "ctrl-alt-shift-s"
+
+[[contributes.keybinding]]
+command = "repeat"
+macos = "ctrl-alt-cmd-r"
+linux = "ctrl-alt-shift-r"
+windows = "ctrl-alt-shift-r"
+
+[[contributes.keybinding]]
+command = "open"
+macos = "ctrl-alt-cmd-o"
+linux = "ctrl-alt-shift-o"
+windows = "ctrl-alt-shift-o"
+
+[[contributes.setting]]
+key = "poll-interval"
+title = "Refresh interval (seconds)"
+description = "How often Spotify's state is read while the panel is open. Between 1 and 30."
+type = "number"
+default = 1.0
+min = 1.0
+max = 30.0
+
+[[contributes.setting]]
+key = "volume-step"
+title = "Volume step"
+description = "Volume points (out of 100) added or removed by the volume commands. Between 1 and 50."
+type = "number"
+default = 10.0
+min = 1.0
+max = 50.0
+
+[[contributes.setting]]
+key = "show-cover"
+title = "Show album artwork"
+description = "Download and show the album artwork. When off, the extension makes no network requests."
+type = "toggle"
+default = true

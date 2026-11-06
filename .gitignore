@@ -1,0 +1,28 @@
+# Rust build output
+/target/
+
+# Release binaries: built locally from source (see README → Installation)
+/bin/*
+!/bin/.gitkeep
+
+# Album artwork cached at runtime by src/artwork.rs
+/cache/
+*.part
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local tooling
+.claude/
+.env
+.env.*
