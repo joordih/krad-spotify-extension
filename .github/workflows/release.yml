@@ -1,0 +1,98 @@
+# Publishes a release when a version tag (vX.Y.Z) is pushed:
+#   1. builds the extension binary for every platform Krad ADE supports,
+#   2. creates the GitHub Release with those binaries as assets,
+#   3. points extension.toml on main at the release downloads (url + sha256),
+#      so installing the extension from this repository needs no local build.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # .cargo/config.toml builds outside the project for local use; CI builds in place.
+  CARGO_TARGET_DIR: target
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin, asset: krad-spotify-darwin-arm64, test: true }
+          - { os: macos-14, target: x86_64-apple-darwin, asset: krad-spotify-darwin-x64, test: false }
+          # Ubuntu 22.04 links against an older glibc, so the binary runs on more distributions.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, asset: krad-spotify-linux-x64, test: true }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, asset: krad-spotify-linux-arm64, test: true }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, asset: krad-spotify-win-x64.exe, test: true }
+          - { os: windows-latest, target: aarch64-pc-windows-msvc, asset: krad-spotify-win-arm64.exe, test: false }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Test
+        if: matrix.test
+        run: cargo test --release --locked --target ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Collect binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          suffix=""
+          case "${{ matrix.target }}" in *windows*) suffix=".exe" ;; esac
+          cp "target/${{ matrix.target }}/release/krad-spotify$suffix" "dist/${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
+
+      - name: Point extension.toml at the release
+        run: |
+          python3 scripts/binaries.py release "$GITHUB_REF_NAME" dist
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extension.toml
+          git commit -m "Point extension.toml at the $GITHUB_REF_NAME release binaries"
+          git pull --rebase origin main
+          git push origin HEAD:main

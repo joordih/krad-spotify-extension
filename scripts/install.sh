@@ -50,4 +50,12 @@ for arch in $arches; do
   echo "installed $dest"
 done
 
+# After a release, extension.toml points at the release downloads; point it
+# at the local builds so Krad ADE runs what was just built.
+python3 scripts/binaries.py local >/dev/null
+if ! git diff --quiet -- extension.toml 2>/dev/null; then
+  echo "extension.toml now uses the binaries in bin/; do not commit that change"
+  echo "(restore the release manifest with: git checkout extension.toml)"
+fi
+
 echo "Reload the Spotify extension in Krad ADE to pick up the new binary."
