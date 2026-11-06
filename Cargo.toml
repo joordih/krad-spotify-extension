@@ -9,16 +9,22 @@ publish = false
 [dependencies]
 krad-extension-sdk = "0.4.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+thiserror = "2"
 
 [[bin]]
 name = "krad-spotify"
 path = "src/main.rs"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+base64 = "0.22"
+serde_json = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
+    "ApplicationModel",
     "Foundation",
     "Foundation_Collections",
     "Media",
@@ -28,6 +34,9 @@ windows = { version = "0.61", features = [
 ] }
 # `IAsyncOperation` lives here since windows 0.61; keep in step with `windows`.
 windows-future = "0.2"
+
+[build-dependencies]
+cc = "1"
 
 [dev-dependencies]
 toml = "1"

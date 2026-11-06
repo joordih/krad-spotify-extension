@@ -1,33 +1,31 @@
 pub mod artwork;
+mod cache;
+pub mod media;
 pub mod settings;
-pub mod spotify;
+mod state;
+mod titlebar;
 pub mod view;
 
-use krad_extension_sdk::api::protocol::{LogLevel, OpenViewParams, SetTitlebarItemParams, ViewRef};
+use krad_extension_sdk::api::protocol::{LogLevel, OpenViewParams, ViewRef};
 use krad_extension_sdk::api::view::{Patch, Tone, ViewEvent};
-use krad_extension_sdk::api::{CommandId, Icon, TitlebarItemId, ViewId};
+use krad_extension_sdk::api::{CommandId, ViewId};
 use krad_extension_sdk::{App, Extension, HandlerError};
 use settings::Settings;
-use spotify::SpotifyAdapter;
-use std::sync::{Arc, Mutex, PoisonError};
+use state::{
+    control_active, lock_state, next_source, observe_sources, only_time_moved, with_cover,
+    SharedState, Shown,
+};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use view::{parse, Player};
+use view::{parse, Action, SourceChoice};
 
+const EXTENSION_NAME: &str = "Spotify";
 const VIEW_ID: &str = "spotify-player";
-/// Titlebar button that opens the popover.
-const NOW_PLAYING_ITEM: &str = "now-playing";
-/// Titlebar button that runs play/pause.
-const PLAY_PAUSE_ITEM: &str = "play-pause";
-/// Opens or closes the popover from the keyboard or the command palette.
 const TOGGLE_PANEL: &str = "toggle-panel";
-/// The poll loop wakes this often to notice a new `poll-interval` without waiting out the old one.
 const POLL_TICK: Duration = Duration::from_millis(250);
-/// The app advances the timeline by itself; a patch is only needed when Spotify's position
-/// strays further than this from where the timeline should be.
-const POSITION_DRIFT_SECS: f64 = 2.0;
 
-const ACTIONS: [&str; 8] = [
+const COMMANDS: [&str; 9] = [
     view::PREVIOUS,
     view::PLAY_PAUSE,
     view::NEXT,
@@ -36,215 +34,90 @@ const ACTIONS: [&str; 8] = [
     view::VOLUME_UP,
     view::VOLUME_DOWN,
     view::OPEN,
+    view::NEXT_SOURCE,
 ];
 
-/// What the open popover last showed, and when.
-struct Shown {
-    view: ViewRef,
-    player: Player,
-    at: Instant,
+fn log(app: &App, level: LogLevel, message: &str) {
+    let _ = app.log(level, format!("{EXTENSION_NAME}: {message}"));
 }
 
-/// What the titlebar buttons last showed, to send only changes.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct TitlebarState {
-    tooltip: String,
-    playing: bool,
-    running: bool,
-}
-
-#[derive(Default)]
-struct SharedState {
-    shown: Option<Shown>,
-    titlebar: Option<TitlebarState>,
-    settings: Settings,
-}
-
-fn lock_state(state: &Mutex<SharedState>) -> std::sync::MutexGuard<'_, SharedState> {
-    state.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-fn load_player(settings: &Settings) -> Player {
-    match SpotifyAdapter::new().current_track() {
-        Ok(track) => Player {
-            // With `show-cover` off the cover is never fetched.
-            cover: track
-                .artwork
-                .as_ref()
-                .filter(|_| settings.show_cover)
-                .and_then(artwork::local_cover),
-            track: Some(track),
-            error: None,
-        },
-        Err(error) => Player {
-            track: None,
-            error: Some(error),
-            cover: None,
-        },
+fn toast(app: &App, message: String, tone: Tone) {
+    if let Err(error) = app.toast(message, tone) {
+        log(
+            app,
+            LogLevel::Warn,
+            &format!("could not show a toast: {error}"),
+        );
     }
 }
 
-/// Whether `new` only differs from `old` by the playback time the app's
-/// advancing timeline already shows after `elapsed`.
-fn only_time_moved(old: &Player, new: &Player, elapsed: Duration) -> bool {
-    let (Some(before), Some(after)) = (&old.track, &new.track) else {
-        return old == new;
-    };
-    let mut aligned = after.clone();
-    aligned.position_secs = before.position_secs;
-    if old.cover != new.cover || old.error != new.error || *before != aligned {
-        return false;
-    }
-    let advanced = if old.is_playing() {
-        elapsed.as_secs_f64()
-    } else {
-        0.0
-    };
-    let expected =
-        (f64::from(before.position_secs) + advanced).min(f64::from(before.duration_secs));
-    (f64::from(after.position_secs) - expected).abs() <= POSITION_DRIFT_SECS
-}
-
-fn titlebar_state(player: &Player) -> TitlebarState {
-    let tooltip = match &player.track {
-        Some(track) if !track.title.is_empty() && !track.artist.is_empty() => {
-            format!("{} — {}", track.title, track.artist)
-        }
-        Some(track) if !track.title.is_empty() => track.title.clone(),
-        _ => "Spotify".to_owned(),
-    };
-    TitlebarState {
-        tooltip,
-        playing: player.is_playing(),
-        running: player.track.is_some(),
-    }
-}
-
-fn update_titlebar(app: &App, state: &Mutex<SharedState>, player: &Player) {
-    let wanted = titlebar_state(player);
-    if lock_state(state).titlebar.as_ref() == Some(&wanted) {
-        return;
-    }
-    let (Ok(now_playing), Ok(play_pause)) = (
-        parse::<TitlebarItemId>(NOW_PLAYING_ITEM),
-        parse::<TitlebarItemId>(PLAY_PAUSE_ITEM),
-    ) else {
-        return;
-    };
-    let (icon, title) = if wanted.playing {
-        (Icon::Stop, "Pause")
-    } else {
-        (Icon::Play, "Play")
-    };
-    let sent = app
-        .set_titlebar_item(&SetTitlebarItemParams {
-            item: now_playing,
-            icon: None,
-            title: Some(wanted.tooltip.clone()),
-            active: Some(wanted.playing),
-            hidden: None,
-        })
-        .and_then(|()| {
-            app.set_titlebar_item(&SetTitlebarItemParams {
-                item: play_pause,
-                icon: Some(icon),
-                title: Some(title.to_owned()),
-                active: None,
-                hidden: Some(!wanted.running),
-            })
-        });
-    match sent {
-        Ok(()) => lock_state(state).titlebar = Some(wanted),
-        Err(error) => {
-            let _ = app.log(
-                LogLevel::Warn,
-                format!("Spotify: could not update the titlebar: {error}"),
-            );
-        }
-    }
-}
-
-/// Reads Spotify, updates the titlebar and, when the popover is open and shows something
-/// out of date, patches it. `force` patches even when only the time moved (after a seek).
 fn refresh(app: &App, state: &Mutex<SharedState>, force: bool) {
-    let settings = lock_state(state).settings;
-    let player = load_player(&settings);
-    update_titlebar(app, state, &player);
+    observe_sources(state);
+    let now_playing = with_cover(state);
+    titlebar::update(app, state, &now_playing);
 
     let view = {
         let state = lock_state(state);
         let Some(shown) = &state.shown else { return };
-        if !force && only_time_moved(&shown.player, &player, shown.at.elapsed()) {
+        if !force && only_time_moved(&shown.now_playing, &now_playing, shown.at.elapsed()) {
             return;
         }
         shown.view.clone()
     };
-    match view::render(&player) {
-        Ok(root) => {
-            if let Err(error) = app.patch_view(view.clone(), vec![Patch::Replace { node: root }]) {
-                let _ = app.log(
-                    LogLevel::Warn,
-                    format!("Spotify: could not update the view: {error}"),
-                );
-            } else if let Some(shown) = lock_state(state)
-                .shown
-                .as_mut()
-                .filter(|shown| shown.view == view)
-            {
-                shown.player = player;
-                shown.at = Instant::now();
-            }
-        }
+    let root = match view::render(&now_playing) {
+        Ok(root) => root,
         Err(error) => {
-            let _ = app.log(
+            log(
+                app,
                 LogLevel::Error,
-                format!("Spotify: could not render the view: {error}"),
+                &format!("could not render the view: {error}"),
             );
+            return;
         }
+    };
+    if let Err(error) = app.patch_view(view.clone(), vec![Patch::Replace { node: root }]) {
+        log(
+            app,
+            LogLevel::Warn,
+            &format!("could not update the view: {error}"),
+        );
+        return;
+    }
+    if let Some(shown) = lock_state(state)
+        .shown
+        .as_mut()
+        .filter(|shown| shown.view == view)
+    {
+        shown.now_playing = now_playing;
+        shown.at = Instant::now();
     }
 }
 
-fn run_action(action: &str, settings: &Settings) -> Option<Result<(), String>> {
-    let adapter = SpotifyAdapter::with_volume_step(settings.volume_step);
-    Some(match action {
-        view::PREVIOUS => adapter.previous(),
-        view::PLAY_PAUSE => adapter.play_pause(),
-        view::NEXT => adapter.next(),
-        view::SHUFFLE => adapter.toggle_shuffle(),
-        view::REPEAT => adapter.toggle_repeat(),
-        view::VOLUME_UP => adapter.volume_up(),
-        view::VOLUME_DOWN => adapter.volume_down(),
-        view::OPEN => adapter.open(),
-        _ => return None,
-    })
-}
-
-fn report(app: &App, state: &Mutex<SharedState>, result: Result<(), String>) {
-    if let Err(error) = result {
-        let _ = app.toast(view::friendly_error(Some(error)), Tone::Error);
+fn run_action(app: &App, state: &Mutex<SharedState>, action: Action) {
+    match action {
+        Action::Control(control) => {
+            if let Err(error) = control_active(state, control) {
+                toast(app, view::friendly_error(Some(&error)), Tone::Error);
+            }
+        }
+        Action::Choose(SourceChoice::Automatic) => {
+            lock_state(state).selector.pin(None);
+        }
+        Action::Choose(SourceChoice::Pin(id)) => {
+            lock_state(state).selector.pin(Some(id));
+        }
+        Action::NextSource => toast(app, next_source(state), Tone::Info),
     }
     refresh(app, state, true);
 }
 
-fn perform(app: &App, state: &Mutex<SharedState>, action: &str) {
-    let settings = lock_state(state).settings;
-    if let Some(result) = run_action(action, &settings) {
-        report(app, state, result);
+fn run_button(app: &App, state: &Mutex<SharedState>, action: &str) {
+    let volume_step = lock_state(state).settings.volume_step;
+    if let Some(action) = Action::parse(action, volume_step) {
+        run_action(app, state, action);
     }
 }
 
-/// A slider was released (or moved with the keyboard) at `value`.
-fn slider_commit(app: &App, state: &Mutex<SharedState>, action: &str, value: f64) {
-    let adapter = SpotifyAdapter::new();
-    let result = match action {
-        view::SEEK => adapter.seek(value),
-        view::VOLUME => adapter.set_volume(value),
-        _ => return,
-    };
-    report(app, state, result);
-}
-
-/// Closes the popover when it is open, opens it otherwise.
 fn toggle_panel(
     app: &App,
     state: &Mutex<SharedState>,
@@ -264,15 +137,27 @@ fn toggle_panel(
     result.map_err(|error| HandlerError::new(error.to_string()))
 }
 
-/// Asks the host for the user's settings. On failure the defaults stay and the cause is logged.
 fn load_settings(app: &App, state: &Mutex<SharedState>) {
     match app.settings() {
         Ok(values) => lock_state(state).settings = Settings::from_values(&values),
-        Err(error) => {
-            let _ = app.log(
-                LogLevel::Warn,
-                format!("Spotify: could not read settings, using defaults: {error}"),
-            );
+        Err(error) => log(
+            app,
+            LogLevel::Warn,
+            &format!("could not read settings, using defaults: {error}"),
+        ),
+    }
+}
+
+fn poll_forever(app: &App, state: &Mutex<SharedState>) {
+    load_settings(app, state);
+    refresh(app, state, false);
+    let mut waited = Duration::ZERO;
+    loop {
+        thread::sleep(POLL_TICK);
+        waited += POLL_TICK;
+        if waited >= lock_state(state).settings.poll_interval {
+            waited = Duration::ZERO;
+            refresh(app, state, false);
         }
     }
 }
@@ -291,21 +176,7 @@ fn extension() -> Result<Extension, HandlerError> {
             artwork::set_extension_folder(params.extension_folder);
             let app = app.clone();
             let state = Arc::clone(&poll_state);
-            thread::spawn(move || {
-                // Off the dispatcher thread: `app.settings()` waits for the host's reply.
-                load_settings(&app, &state);
-                // Polls even while the popover is closed, to keep the titlebar buttons current.
-                refresh(&app, &state, false);
-                let mut waited = Duration::ZERO;
-                loop {
-                    thread::sleep(POLL_TICK);
-                    waited += POLL_TICK;
-                    if waited >= lock_state(&state).settings.poll_interval {
-                        waited = Duration::ZERO;
-                        refresh(&app, &state, false);
-                    }
-                }
-            });
+            thread::spawn(move || poll_forever(&app, &state));
         })
         .on_settings_changed(move |app, values| {
             lock_state(&settings_state).settings = Settings::from_values(&values);
@@ -314,12 +185,12 @@ fn extension() -> Result<Extension, HandlerError> {
         .on_popover(
             view_id.clone(),
             move |_, view| {
-                let settings = lock_state(&open_state).settings;
-                let player = load_player(&settings);
-                let root = view::render(&player)?;
+                observe_sources(&open_state);
+                let now_playing = with_cover(&open_state);
+                let root = view::render(&now_playing)?;
                 lock_state(&open_state).shown = Some(Shown {
                     view,
-                    player,
+                    now_playing,
                     at: Instant::now(),
                 });
                 Ok(root)
@@ -332,17 +203,19 @@ fn extension() -> Result<Extension, HandlerError> {
             },
         )
         .on_view_event(view_id.clone(), move |app, params| match params.event {
-            ViewEvent::Click { action } => perform(app, &event_state, action.as_ref()),
+            ViewEvent::Click { action } => run_button(app, &event_state, action.as_ref()),
             ViewEvent::SliderCommit { action, value } => {
-                slider_commit(app, &event_state, action.as_ref(), value);
+                if let Some(action) = Action::from_slider(action.as_ref(), value) {
+                    run_action(app, &event_state, action);
+                }
             }
             _ => {}
         });
 
-    for action in ACTIONS {
+    for command in COMMANDS {
         let command_state = Arc::clone(&state);
-        extension = extension.on_command(parse::<CommandId>(action)?, move |app, _| {
-            perform(app, &command_state, action);
+        extension = extension.on_command(parse::<CommandId>(command)?, move |app, _| {
+            run_button(app, &command_state, command);
             Ok(())
         });
     }
@@ -353,61 +226,45 @@ fn extension() -> Result<Extension, HandlerError> {
     Ok(extension)
 }
 
-fn main() -> std::process::ExitCode {
-    match extension() {
-        Ok(extension) => match extension.run() {
-            Ok(()) => std::process::ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("krad-spotify: {error}");
-                std::process::ExitCode::FAILURE
-            }
-        },
-        Err(error) => {
-            eprintln!("krad-spotify: {error}");
-            std::process::ExitCode::FAILURE
-        }
-    }
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    extension()?.run()?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use krad_extension_sdk::api::manifest::{ExtensionManifest, TitlebarAction, ViewZone};
-    use spotify::TrackState;
+    use titlebar::{NOW_PLAYING_ITEM, PLAY_PAUSE_ITEM};
 
-    fn manifest() -> ExtensionManifest {
-        toml::from_str(include_str!("../extension.toml")).unwrap()
-    }
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-    fn playing_at(position_secs: u32) -> Player {
-        Player {
-            track: Some(TrackState {
-                title: "Song".to_owned(),
-                duration_secs: 200,
-                position_secs,
-                player_state: "playing".to_owned(),
-                ..TrackState::default()
-            }),
-            ..Player::default()
-        }
+    fn manifest() -> Result<ExtensionManifest, toml::de::Error> {
+        toml::from_str(include_str!("../extension.toml"))
     }
 
     #[test]
-    fn manifest_is_valid_and_every_command_has_a_handler() {
-        let manifest = manifest();
-        manifest.check().unwrap();
+    fn manifest_is_valid_and_every_command_has_a_handler() -> TestResult {
+        let manifest = manifest()?;
+        manifest.check()?;
         let declared: Vec<String> = manifest
             .contributes
             .commands
             .iter()
             .map(|command| command.id.to_string())
             .collect();
-        let handled: Vec<&str> = ACTIONS.iter().copied().chain([TOGGLE_PANEL]).collect();
+        let handled: Vec<&str> = COMMANDS.iter().copied().chain([TOGGLE_PANEL]).collect();
         assert_eq!(declared.len(), handled.len());
         for id in handled {
             assert!(
                 declared.iter().any(|declared| declared == id),
                 "{id} not declared"
+            );
+        }
+        for command in COMMANDS {
+            assert!(
+                Action::parse(command, 1).is_some(),
+                "{command} is no action"
             );
         }
         for binding in &manifest.contributes.keybindings {
@@ -417,54 +274,29 @@ mod tests {
             assert!(binding.linux.is_some(), "{id} has no Linux shortcut");
             assert!(binding.windows.is_some(), "{id} has no Windows shortcut");
         }
+        Ok(())
     }
 
     #[test]
-    fn the_view_is_a_popover_opened_from_the_titlebar() {
-        let manifest = manifest();
-        assert_eq!(manifest.contributes.views[0].id.as_ref(), VIEW_ID);
-        assert_eq!(manifest.contributes.views[0].zone, ViewZone::Popover);
+    fn the_view_is_a_popover_opened_from_the_titlebar() -> TestResult {
+        let manifest = manifest()?;
+        let popover = manifest.contributes.views.first().ok_or("no view")?;
+        assert_eq!(popover.id.as_ref(), VIEW_ID);
+        assert_eq!(popover.zone, ViewZone::Popover);
         let items = &manifest.contributes.titlebar_items;
         let opener = items
             .iter()
             .find(|item| item.id.as_ref() == NOW_PLAYING_ITEM)
-            .unwrap();
-        assert_eq!(opener.action, TitlebarAction::View(parse(VIEW_ID).unwrap()));
+            .ok_or("no opener")?;
+        assert_eq!(opener.action, TitlebarAction::View(parse(VIEW_ID)?));
         let play = items
             .iter()
             .find(|item| item.id.as_ref() == PLAY_PAUSE_ITEM)
-            .unwrap();
+            .ok_or("no play button")?;
         assert_eq!(
             play.action,
-            TitlebarAction::Command(parse(view::PLAY_PAUSE).unwrap())
+            TitlebarAction::Command(parse(view::PLAY_PAUSE)?)
         );
-    }
-
-    #[test]
-    fn steady_playback_needs_no_patch_but_a_jump_does() {
-        let shown = playing_at(10);
-        let elapsed = Duration::from_secs(5);
-        assert!(only_time_moved(&shown, &playing_at(15), elapsed));
-        assert!(only_time_moved(&shown, &playing_at(16), elapsed));
-        assert!(!only_time_moved(&shown, &playing_at(60), elapsed));
-        let mut other = playing_at(15);
-        other.track.as_mut().unwrap().title = "Next song".to_owned();
-        assert!(!only_time_moved(&shown, &other, elapsed));
-        let mut paused = playing_at(10);
-        paused.track.as_mut().unwrap().player_state = "paused".to_owned();
-        assert!(!only_time_moved(&shown, &paused, elapsed));
-    }
-
-    #[test]
-    fn the_titlebar_names_the_track_and_hides_play_when_closed() {
-        let state = titlebar_state(&playing_at(0));
-        assert_eq!(state.tooltip, "Song");
-        assert!(state.playing && state.running);
-        let mut with_artist = playing_at(0);
-        with_artist.track.as_mut().unwrap().artist = "Artist".to_owned();
-        assert_eq!(titlebar_state(&with_artist).tooltip, "Song — Artist");
-        let closed = titlebar_state(&Player::default());
-        assert_eq!(closed.tooltip, "Spotify");
-        assert!(!closed.running);
+        Ok(())
     }
 }

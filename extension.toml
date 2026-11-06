@@ -1,7 +1,7 @@
 id = "spotify"
 name = "Spotify"
 version = "0.2.0"
-description = "Shows and controls the local Spotify player on macOS, Linux and Windows"
+description = "Shows and controls the local Spotify player, Apple Music, browsers and other media players on macOS, Linux and Windows"
 api = "1.1"
 activation = ["startup"]
 
@@ -107,6 +107,11 @@ id = "open"
 title = "Spotify: Open Current Track in Spotify"
 icon = "open-external"
 
+[[contributes.command]]
+id = "next-source"
+title = "Spotify: Next Source"
+icon = "target"
+
 [[contributes.keybinding]]
 command = "toggle-panel"
 macos = "ctrl-alt-cmd-p"
@@ -161,6 +166,12 @@ macos = "ctrl-alt-cmd-o"
 linux = "ctrl-alt-shift-o"
 windows = "ctrl-alt-shift-o"
 
+[[contributes.keybinding]]
+command = "next-source"
+macos = "ctrl-alt-cmd-n"
+linux = "ctrl-alt-shift-n"
+windows = "ctrl-alt-shift-n"
+
 [[contributes.setting]]
 key = "poll-interval"
 title = "Refresh interval (seconds)"
@@ -185,3 +196,10 @@ title = "Show album artwork"
 description = "Download and show the album artwork. When off, the extension makes no network requests."
 type = "toggle"
 default = true
+
+[[contributes.setting]]
+key = "ignored-apps"
+title = "Ignored apps"
+description = "Comma-separated app names to never show or control, e.g. \"Chrome, Safari\". An entry matches an app whose name contains it, or whose id has it as a whole part (\"vlc\" in org.mpris.MediaPlayer2.vlc), ignoring case."
+type = "text"
+default = ""
