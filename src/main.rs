@@ -287,7 +287,8 @@ fn extension() -> Result<Extension, HandlerError> {
     let settings_state = Arc::clone(&state);
 
     let mut extension = Extension::new()
-        .on_initialize(move |app, _| {
+        .on_initialize(move |app, params| {
+            artwork::set_extension_folder(params.extension_folder);
             let app = app.clone();
             let state = Arc::clone(&poll_state);
             thread::spawn(move || {

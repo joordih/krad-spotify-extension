@@ -26,4 +26,24 @@ $tmp = "$dest.tmp"
 Copy-Item (Join-Path $targetDir "$target\release\krad-spotify.exe") $tmp -Force
 Move-Item $tmp $dest -Force
 Write-Host "installed $dest"
+
+# After a release, extension.toml points at the release downloads; point it
+# at the local builds so Krad ADE runs what was just built (same result as
+# scripts/binaries.py local).
+$platforms = [ordered]@{
+    darwin_arm64 = "krad-spotify-darwin-arm64"; darwin_x64 = "krad-spotify-darwin-x64"
+    linux_x64 = "krad-spotify-linux-x64"; linux_arm64 = "krad-spotify-linux-arm64"
+    win_x64 = "krad-spotify-win-x64.exe"; win_arm64 = "krad-spotify-win-arm64.exe"
+}
+$entries = foreach ($target in $platforms.Keys) {
+    "[[program.binary]]`ntargets = [`"$target`"]`npath = `"bin/$($platforms[$target])`"`n"
+}
+$block = "# BEGIN BINARIES (local builds; run scripts/binaries.py to change)`n" + ($entries -join "`n") + "# END BINARIES"
+$manifest = Get-Content extension.toml -Raw
+$updated = [regex]::Replace($manifest, '(?ms)^# BEGIN BINARIES.*?^# END BINARIES[^\r\n]*', { param($m) $block })
+if ($updated -ne $manifest) {
+    [IO.File]::WriteAllText((Join-Path (Get-Location) "extension.toml"), $updated)
+    Write-Host "extension.toml now uses the binaries in bin/; do not commit that change"
+    Write-Host "(restore the release manifest with: git checkout extension.toml)"
+}
 Write-Host "Reload the Spotify extension in Krad ADE to pick up the new binary."

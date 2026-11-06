@@ -8,6 +8,7 @@ activation = ["startup"]
 [program]
 placement = "app"
 
+# BEGIN BINARIES (local builds; run scripts/binaries.py to change)
 [[program.binary]]
 targets = ["darwin_arm64"]
 path = "bin/krad-spotify-darwin-arm64"
@@ -31,6 +32,7 @@ path = "bin/krad-spotify-win-x64.exe"
 [[program.binary]]
 targets = ["win_arm64"]
 path = "bin/krad-spotify-win-arm64.exe"
+# END BINARIES
 
 [[contributes.view]]
 id = "spotify-player"

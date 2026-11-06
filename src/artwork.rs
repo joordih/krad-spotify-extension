@@ -18,6 +18,7 @@ use image::{Rgba, RgbaImage};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use crate::spotify::{self, Artwork};
 
@@ -39,8 +40,25 @@ const SCALE: u32 = 2;
 /// Corner radius in logical pixels.
 const CORNER_RADIUS: f32 = 14.0;
 
-/// Extension folder: the binary lives at `<folder>/bin/<binary>`.
+/// The extension folder the app reported in `initialize`.
+static EXTENSION_FOLDER: OnceLock<PathBuf> = OnceLock::new();
+
+/// Records the extension folder from the app's `initialize` parameters.
+///
+/// A downloaded binary (`url` + `sha256` in the manifest) runs from the app's
+/// program cache, not from the extension folder, so the folder cannot be
+/// derived from the binary's own path.
+pub fn set_extension_folder(folder: PathBuf) {
+    let _ = EXTENSION_FOLDER.set(folder);
+}
+
+/// The folder bundled images are resolved against. Before `initialize`, or
+/// when the app sent no folder, it falls back to the bundled-binary layout
+/// `<folder>/bin/<binary>`.
 fn extension_folder() -> Option<PathBuf> {
+    if let Some(folder) = EXTENSION_FOLDER.get().filter(|folder| folder.is_dir()) {
+        return Some(folder.clone());
+    }
     let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
     Some(exe.parent()?.parent()?.to_path_buf())
 }

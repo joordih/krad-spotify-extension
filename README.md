@@ -55,6 +55,20 @@ Features a platform does not support are hidden from the panel (see [Platform su
 
 ## Installation
 
+### From GitHub (recommended)
+
+1. In Krad ADE, open the extension manager and add the repository URL:
+
+   ```
+   https://github.com/raloonsoc/krad-spotify-extension
+   ```
+
+2. Trust and enable **Spotify**.
+
+Krad ADE clones the default branch (`main`) into `~/.config/krad-ade/extensions/spotify`. On first start it downloads the binary for your platform from the latest GitHub Release, checks it against the SHA-256 in `extension.toml`, and keeps it in its program cache. Nothing is built on your machine. **Update** in the extension manager pulls `main` and asks for trust again.
+
+### From a local folder (development)
+
 1. Build the binary for your machine and install it into `bin/`:
 
    ```sh
@@ -71,20 +85,23 @@ Features a platform does not support are hidden from the panel (see [Platform su
 
    The scripts build in release mode and replace the binary with a new file rather than overwriting it in place. On macOS, overwriting a binary that Krad ADE is running makes the system kill the new one with *Code Signature Invalid*. On Windows, a running `.exe` is locked, so disable the extension in Krad ADE before installing.
 
+   They also point `extension.toml` at the binaries in `bin/` (`scripts/binaries.py local`), because after a release it points at the release downloads. Do not commit that change; `git checkout extension.toml` restores the release manifest.
+
    Cross-architecture builds need the matching Rust standard library, available through `rustup target add <target>`. The Homebrew Rust package only includes the host target.
 
-2. Keep `extension.toml` and `bin/` together in one folder. The extension must be able to write to this folder, because it creates the `cache` link there.
+2. In Krad ADE, open the extension manager, add the project folder, and enable **Spotify**. The extension must be able to write to the folder, because it creates the `cache` link there.
 
-   Krad ADE refuses extension folders over 256 MB and asks for trust again whenever a file in the folder changes. `.cargo/config.toml` therefore builds into `../krad-spotify-extension-target`, next to the project, rather than into `target/` inside it.
-3. In Krad ADE, open the extension manager, add that local folder, and enable **Spotify**.
+Krad ADE refuses extension folders over 256 MB and asks for trust again whenever a file in the folder changes. `.cargo/config.toml` therefore builds into `../krad-spotify-extension-target`, next to the project, rather than into `target/` inside it.
 
-`extension.toml` declares these binaries; Krad ADE picks the one for the current platform:
+### Binaries
+
+`extension.toml` declares one binary per platform, between the `# BEGIN BINARIES` and `# END BINARIES` markers, and Krad ADE picks the one for the current platform. Released manifests download them from the GitHub Release (`url` + `sha256`); local manifests use `bin/`:
 
 | Platform | Binary |
 | --- | --- |
-| macOS (Apple Silicon / Intel) | `bin/krad-spotify-darwin-arm64` / `bin/krad-spotify-darwin-x64` |
-| Linux (x64 / arm64) | `bin/krad-spotify-linux-x64` / `bin/krad-spotify-linux-arm64` |
-| Windows (x64 / arm64) | `bin/krad-spotify-win-x64.exe` / `bin/krad-spotify-win-arm64.exe` |
+| macOS (Apple Silicon / Intel) | `krad-spotify-darwin-arm64` / `krad-spotify-darwin-x64` |
+| Linux (x64 / arm64) | `krad-spotify-linux-x64` / `krad-spotify-linux-arm64` |
+| Windows (x64 / arm64) | `krad-spotify-win-x64.exe` / `krad-spotify-win-arm64.exe` |
 
 ## Usage
 
@@ -237,6 +254,23 @@ cargo clippy --release --tests --target x86_64-pc-windows-msvc
 This type-checks without linking, so it needs no cross linker. Producing binaries for another OS needs that OS's linker; build them on the target system with the install scripts.
 
 After changes, run the install script and reload the extension in Krad ADE.
+
+### Releasing
+
+Push a version tag from `main`:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The **Release** workflow (`.github/workflows/release.yml`) then:
+
+1. Runs the tests and builds the binary for all six platforms on GitHub-hosted macOS, Linux, and Windows runners.
+2. Creates the GitHub Release for the tag, with the binaries as assets.
+3. Rewrites the binaries block and `version` in `extension.toml` with `scripts/binaries.py release` and pushes that commit to `main`.
+
+From then on, installing or updating from GitHub uses the new binaries.
 
 ## License
 
