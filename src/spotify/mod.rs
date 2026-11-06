@@ -28,6 +28,8 @@ pub const UNSUPPORTED: &str = "Not supported by Spotify on this platform";
 /// What the current platform's backend can read and control.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Capabilities {
+    /// Jumping to a position in the track.
+    pub seek: bool,
     pub shuffle: bool,
     pub repeat: bool,
     pub volume: bool,
@@ -132,6 +134,21 @@ impl SpotifyAdapter {
         platform::change_volume(-i16::from(self.volume_step))
     }
 
+    /// Sets the volume to `percent` (0–100).
+    pub fn set_volume(&self, percent: f64) -> Result<(), String> {
+        supported(CAPABILITIES.volume)?;
+        platform::set_volume(percent_of(percent))
+    }
+
+    /// Jumps to `secs` seconds into the current track.
+    pub fn seek(&self, secs: f64) -> Result<(), String> {
+        supported(CAPABILITIES.seek)?;
+        if !secs.is_finite() {
+            return Err("Invalid position".to_owned());
+        }
+        platform::seek(secs.max(0.0))
+    }
+
     /// Brings Spotify to the front, on the current track where the platform allows it.
     pub fn open(&self) -> Result<(), String> {
         platform::open()
@@ -148,6 +165,15 @@ fn supported(capability: bool) -> Result<(), String> {
         Ok(())
     } else {
         Err(UNSUPPORTED.to_owned())
+    }
+}
+
+/// A slider value as a whole volume percentage within 0–100.
+fn percent_of(value: f64) -> u8 {
+    if value.is_finite() {
+        value.round().clamp(0.0, 100.0) as u8
+    } else {
+        0
     }
 }
 
@@ -175,6 +201,14 @@ mod tests {
         assert_eq!(stepped_volume(95, 10), 100);
         assert_eq!(stepped_volume(5, -10), 0);
         assert_eq!(stepped_volume(50, 10), 60);
+    }
+
+    #[test]
+    fn slider_values_become_whole_percentages() {
+        assert_eq!(percent_of(42.6), 43);
+        assert_eq!(percent_of(140.0), 100);
+        assert_eq!(percent_of(-3.0), 0);
+        assert_eq!(percent_of(f64::NAN), 0);
     }
 
     /// Needs Spotify open: `cargo test -- --ignored --nocapture`.

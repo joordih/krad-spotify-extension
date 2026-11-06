@@ -14,6 +14,7 @@ use zbus::names::BusName;
 use zbus::zvariant::{OwnedValue, Value};
 
 pub const CAPABILITIES: Capabilities = Capabilities {
+    seek: true,
     shuffle: true,
     repeat: true,
     volume: true,
@@ -174,6 +175,40 @@ pub fn change_volume(delta: i16) -> Result<(), String> {
     let current = (volume.clamp(0.0, 1.0) * 100.0).round() as u8;
     let target = f64::from(stepped_volume(current, delta)) / 100.0;
     player.set_property("Volume", target).map_err(failure)
+}
+
+pub fn set_volume(percent: u8) -> Result<(), String> {
+    player()?
+        .set_property("Volume", f64::from(percent) / 100.0)
+        .map_err(failure)
+}
+
+/// `SetPosition` needs the track id as an object path. Clients that publish
+/// a `spotify:track:` string instead get a relative `Seek` from the reported
+/// position.
+pub fn seek(secs: f64) -> Result<(), String> {
+    let player = player()?;
+    let target = (secs * MICROS_PER_SEC as f64) as i64;
+    let metadata: HashMap<String, OwnedValue> = player.get_property("Metadata").map_err(failure)?;
+    let track = metadata
+        .get("mpris:trackid")
+        .and_then(|value| match &**value {
+            Value::ObjectPath(path) => Some(path.to_owned()),
+            _ => None,
+        });
+    match track {
+        Some(track) => player
+            .call_method("SetPosition", &(track, target))
+            .map(drop)
+            .map_err(failure),
+        None => {
+            let position: i64 = player.get_property("Position").unwrap_or(0);
+            player
+                .call_method("Seek", &(target - position))
+                .map(drop)
+                .map_err(failure)
+        }
+    }
 }
 
 /// Opens the current track with the `spotify:` URI handler, or raises the

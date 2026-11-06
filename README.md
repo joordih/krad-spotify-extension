@@ -1,8 +1,8 @@
 # Krad Spotify
 
-A [Krad ADE](https://github.com/joordih/krad-ade) extension that brings a Control Center–style *Now Playing* panel for the local Spotify desktop player into Krad ADE. Toggle it with a shortcut, or drive Spotify from the command palette.
+A [Krad ADE](https://github.com/joordih/krad-ade) extension that adds a Control Center–style *Now Playing* popover for the local Spotify desktop player to Krad ADE's titlebar. Open it from the titlebar or a shortcut, or drive Spotify from the command palette.
 
-Built in Rust on [`krad-extension-sdk`](https://crates.io/crates/krad-extension-sdk) 0.3.0. It talks to the Spotify desktop app through each operating system's own media interface, so it needs no Spotify account credentials, OAuth flow, or Web API access.
+Built in Rust on [`krad-extension-sdk`](https://crates.io/crates/krad-extension-sdk) 0.4.0 (extension API 1.1). It talks to the Spotify desktop app through each operating system's own media interface, so it needs no Spotify account credentials, OAuth flow, or Web API access.
 
 ## Platform support
 
@@ -18,24 +18,25 @@ Features available on each platform:
 | --- | --- | --- | --- |
 | Track details and artwork | ✓ | ✓ | ✓ (from the media session thumbnail) |
 | Play/pause, next, previous | ✓ | ✓ | ✓ |
-| Progress | ✓ | ✓ ¹ | ✓ |
+| Timeline and seeking | ✓ | ✓ ¹ | ✓ |
 | Shuffle and repeat | ✓ | ✓ ¹ | ✓ |
 | Volume | ✓ | ✓ ¹ | — ² |
 | Open on the current track | ✓ | ✓ | Opens Spotify ³ |
 
-1. These calls follow the MPRIS specification, but some Spotify versions report a position of 0 or ignore changes to shuffle, repeat, or volume.
+1. These calls follow the MPRIS specification, but some Spotify versions report a position of 0 or ignore seeking and changes to shuffle, repeat, or volume.
 2. Windows' media controls have no per-app volume, so the volume tile and commands are hidden on Windows.
 3. The Windows media session does not expose the track ID, so Spotify opens on whatever it is showing.
 
 ## Features
 
-- **Control Center layout:** a side panel made of rounded tiles that you show or hide with a shortcut.
+- **Titlebar buttons:** a play/pause button and a button that opens the *Now Playing* popover. The popover button's tooltip names the current track and it is highlighted while music plays; play/pause hides while Spotify is closed.
+- **Control Center layout:** a popover made of rounded tiles.
 - **Now playing:** large rounded album artwork, track title, artist, album, track number, and album artist (when it differs from the track artist).
-- **Progress:** elapsed time, track duration, and a progress bar.
+- **Timeline:** a slider with elapsed and remaining time that advances on its own while playing. Drag it to seek.
 - **Playback state:** a status badge for *playing*, *paused*, or *stopped*.
 - **Transport controls:** previous, play/pause, and next.
 - **Playback modes:** shuffle and repeat toggles, highlighted while the mode is on.
-- **Volume:** step up or down, with a level bar and percentage.
+- **Volume:** a draggable slider with its percentage, plus −/+ step buttons.
 - **Open in Spotify:** brings Spotify to the front.
 - **Commands and shortcuts:** every action is in the command palette and has a shortcut inside Krad ADE.
 - **Settings:** polling interval, volume step, and an option to turn artwork off, changeable without restarting.
@@ -48,7 +49,7 @@ Features a platform does not support are hidden from the panel (see [Platform su
 | --- | --- |
 | OS | macOS, Linux (x64 or arm64, with a D-Bus session bus), or Windows 10/11 (x64 or arm64) |
 | Spotify | Desktop app, installed and running |
-| Krad ADE | Extension API `1.0` |
+| Krad ADE | 0.3.2 or later (extension API `1.1`) |
 | Rust toolchain | Stable, for building from source |
 | `curl` | On `PATH` for artwork downloads (macOS and Linux) |
 
@@ -104,14 +105,19 @@ Krad ADE refuses extension folders over 256 MB and asks for trust again whenever
 
 ## Usage
 
-Press the *Show / hide panel* shortcut (or run **Spotify: Show / Hide Control Center**) to show or hide the panel. It opens in Krad ADE's side panel and stacks these tiles, from top to bottom:
+The extension adds two buttons to the right of Krad ADE's titlebar, next to the ADE/Editor switch:
+
+- **▶ Play / pause** toggles playback. Its icon follows the playback state, and it hides while Spotify is closed.
+- **⌄ Now Playing** opens the popover. Its tooltip shows the current track, and it is highlighted while music plays.
+
+The popover also opens and closes with the *Show / hide Now Playing* shortcut or **Spotify: Show / Hide Now Playing**, and closes with `Esc`. It stacks these tiles, from top to bottom:
 
 1. **Header:** playback status badge and an *Open in Spotify* button.
-2. **Now Playing:** artwork, track details, progress, and transport controls.
+2. **Now Playing:** artwork, track details, the timeline slider, and transport controls.
 3. **Shuffle** and **Repeat:** side-by-side tiles that are highlighted while the mode is on.
-4. **Volume:** −/+ buttons around a level bar.
+4. **Volume:** a volume slider between −/+ buttons.
 
-The panel is also listed among the side panel's tabs. While it is open, it shows the current track and refreshes at the configured interval. When Spotify is not running, the view says so and its controls are disabled. The extension never launches Spotify by itself.
+Drag the timeline to seek, or the volume slider to set the volume; the change is sent when you release it (or with the arrow keys while the slider has focus). While the popover is open it refreshes at the configured interval; the timeline moves smoothly in between. When Spotify is not running, the popover says so and its controls are disabled. The extension never launches Spotify by itself.
 
 ### Commands and keyboard shortcuts
 
@@ -119,7 +125,7 @@ All actions are in the command palette under the `Spotify:` prefix.
 
 | Action | Command ID | macOS | Linux and Windows |
 | --- | --- | --- | --- |
-| Show / hide panel | `toggle-panel` | `⌃⌥⌘ P` | `Ctrl+Alt+Shift+P` |
+| Show / hide Now Playing | `toggle-panel` | `⌃⌥⌘ P` | `Ctrl+Alt+Shift+P` |
 | Play / pause | `playpause` | `⌃⌥⌘ Space` | `Ctrl+Alt+Shift+Space` |
 | Next track | `next` | `⌃⌥⌘ →` | `Ctrl+Alt+Shift+→` |
 | Previous track | `previous` | `⌃⌥⌘ ←` | `Ctrl+Alt+Shift+←` |
@@ -137,7 +143,7 @@ These settings are declared in `extension.toml` and edited in Krad ADE's extensi
 
 | Key | Default | Range | Description |
 | --- | --- | --- | --- |
-| `poll-interval` | `1` | 1–30 seconds | How often Spotify's state is read while the view is open. |
+| `poll-interval` | `1` | 1–30 seconds | How often Spotify's state is read. It keeps the titlebar buttons and the open popover current. |
 | `volume-step` | `10` | 1–50 | Volume points (out of 100) added or removed by the volume commands. |
 | `show-cover` | `true` | on / off | Fetch and show the album artwork. When off, the extension makes no network requests. |
 
@@ -180,7 +186,9 @@ Any other error is shown as-is in the view or as a toast.
 
 | Module | Responsibility |
 | --- | --- |
-| `src/main.rs` | Extension entry point: panel rendering, view events, commands (including the panel toggle), settings, and the polling loop. |
+| `src/main.rs` | Extension entry point: polling, titlebar buttons, popover lifecycle, view events, and commands. |
+| `src/view.rs` | Builds the popover's tiles, sliders, and buttons. |
+| `src/settings.rs` | Reads the user settings. |
 | `src/spotify/mod.rs` | `SpotifyAdapter`, the shared track model, and the per-platform capabilities. |
 | `src/spotify/macos.rs` | macOS backend: AppleScript through `osascript`. |
 | `src/spotify/linux.rs` | Linux backend: MPRIS over D-Bus with `zbus`. |
@@ -221,11 +229,8 @@ Krad ADE's view renderer only draws images bundled with the extension (`ImageSou
 ## Limitations
 
 - **Local control only.** The extension controls the Spotify desktop app on this computer. It does not use Spotify Connect, the Web API, or OAuth.
-- **Not a floating popup.** The extension API (0.3.0) only places views in fixed zones (sidebar, side panel, utilities, editor tab). It has no floating windows or popovers, so the panel opens in the side panel.
-- **Toggle after a manual hide.** Krad ADE does not notify extensions when you only hide the side panel. After hiding it by hand, the first toggle closes the hidden view and the second shows it again.
-- **Polling, not events.** State refreshes every 1–30 seconds, so changes made in Spotify appear after a short delay.
-- **Coarse bars.** The SDK has no progress or slider element, so the progress and volume bars are built from a grid limited to 12 columns. They move in twelfths and cannot be dragged.
-- **Icon set.** The SDK has no pause or shuffle icon. Play/pause shows a *stop* icon while playing, and shuffle uses the *exchange* icon.
+- **Polling, not events.** State is read every 1–30 seconds, so changes made in Spotify itself (a new track, pausing) appear after a short delay. The timeline still moves smoothly in between.
+- **Icon set.** The SDK has no pause, shuffle, or music icon. Play/pause shows a *stop* icon while playing, shuffle uses the *exchange* icon, and the popover button uses a *chevron*.
 - **No "Like".** None of the platform interfaces lets the extension like a track (on macOS, `starred` is read-only).
 - **Platform gaps.** See [Platform support](#platform-support).
 

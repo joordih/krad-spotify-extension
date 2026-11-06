@@ -21,6 +21,7 @@ use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 use windows_future::IAsyncOperation;
 
 pub const CAPABILITIES: Capabilities = Capabilities {
+    seek: true,
     shuffle: true,
     repeat: true,
     volume: false,
@@ -192,6 +193,22 @@ pub fn toggle_repeat() -> Result<(), String> {
 
 pub fn change_volume(_delta: i16) -> Result<(), String> {
     Err(super::UNSUPPORTED.to_owned())
+}
+
+pub fn set_volume(_percent: u8) -> Result<(), String> {
+    Err(super::UNSUPPORTED.to_owned())
+}
+
+/// The position is given in timeline ticks from the start of the track.
+pub fn seek(secs: f64) -> Result<(), String> {
+    let session = session()?;
+    let start = session
+        .GetTimelineProperties()
+        .and_then(|timeline| timeline.StartTime())
+        .map(|span| span.Duration)
+        .unwrap_or(0);
+    let ticks = start + (secs * TICKS_PER_SEC as f64) as i64;
+    control(|session| session.TryChangePlaybackPositionAsync(ticks))
 }
 
 /// Brings Spotify to the front through its `spotify:` URI handler. The media

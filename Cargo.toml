@@ -7,7 +7,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-krad-extension-sdk = "0.3.0"
+krad-extension-sdk = "0.4.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
 [[bin]]

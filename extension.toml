@@ -2,7 +2,7 @@ id = "spotify"
 name = "Spotify"
 version = "0.1.1"
 description = "Shows and controls the local Spotify player on macOS, Linux and Windows"
-api = "1.0"
+api = "1.1"
 activation = ["startup"]
 
 [program]
@@ -43,12 +43,28 @@ sha256 = "d1fc64038d4e8b9d07f065ce1e115224279e8c1f57e94ccd476bd9e97b2f5046"
 [[contributes.view]]
 id = "spotify-player"
 title = "Spotify"
-zone = "side_panel"
+zone = "popover"
 icon = "play"
+
+# Titlebar buttons, next to the ADE/Editor switch: play/pause, then the
+# button that opens the Now Playing popover.
+[[contributes.titlebar_item]]
+id = "play-pause"
+title = "Play"
+icon = "play"
+side = "right"
+command = "playpause"
+
+[[contributes.titlebar_item]]
+id = "now-playing"
+title = "Spotify"
+icon = "chevron-down"
+side = "right"
+view = "spotify-player"
 
 [[contributes.command]]
 id = "toggle-panel"
-title = "Spotify: Show / Hide Control Center"
+title = "Spotify: Show / Hide Now Playing"
 icon = "layers"
 
 [[contributes.command]]
