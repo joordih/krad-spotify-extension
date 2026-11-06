@@ -4,6 +4,7 @@ use super::{nonempty, Artwork, Capabilities, TrackState, NOT_RUNNING};
 use std::process::{Command, Output};
 
 pub const CAPABILITIES: Capabilities = Capabilities {
+    seek: true,
     shuffle: true,
     repeat: true,
     volume: true,
@@ -101,6 +102,15 @@ pub fn change_volume(delta: i16) -> Result<(), String> {
          if v < 0 then set v to 0\n\
          set sound volume to v"
     ))
+}
+
+pub fn set_volume(percent: u8) -> Result<(), String> {
+    tell(&format!("set sound volume to {percent}"))
+}
+
+/// Whole seconds keep locale-dependent decimal separators out of the script.
+pub fn seek(secs: f64) -> Result<(), String> {
+    tell(&format!("set player position to {}", secs.round() as u64))
 }
 
 pub fn open() -> Result<(), String> {

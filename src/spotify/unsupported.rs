@@ -3,6 +3,7 @@
 use super::{Capabilities, TrackState};
 
 pub const CAPABILITIES: Capabilities = Capabilities {
+    seek: false,
     shuffle: false,
     repeat: false,
     volume: false,
@@ -35,6 +36,14 @@ pub fn toggle_repeat() -> Result<(), String> {
 }
 
 pub fn change_volume(_delta: i16) -> Result<(), String> {
+    Err(UNAVAILABLE.to_owned())
+}
+
+pub fn set_volume(_percent: u8) -> Result<(), String> {
+    Err(UNAVAILABLE.to_owned())
+}
+
+pub fn seek(_secs: f64) -> Result<(), String> {
     Err(UNAVAILABLE.to_owned())
 }
 
