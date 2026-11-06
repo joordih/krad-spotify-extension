@@ -25,6 +25,10 @@ case "${1:-$(uname -m)}" in
   *) echo "usage: $0 [arm64|x64|all]" >&2; exit 2 ;;
 esac
 
+# Build output lives outside the extension folder (see .cargo/config.toml).
+target_dir=$(cargo metadata --format-version 1 --no-deps |
+  sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+
 mkdir -p bin
 for arch in $arches; do
   case "$os-$arch" in
@@ -38,7 +42,7 @@ for arch in $arches; do
   cargo build --release --target "$target"
 
   tmp="$dest.tmp.$$"
-  cp "target/$target/release/krad-spotify" "$tmp"
+  cp "$target_dir/$target/release/krad-spotify" "$tmp"
   mv -f "$tmp" "$dest"
   if [ "$os" = "darwin" ]; then
     codesign --verify "$dest"
